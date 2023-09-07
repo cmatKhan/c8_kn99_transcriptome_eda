@@ -1,0 +1,6 @@
+# gffcompare v0.12.6 | Command line was:
+#gffcompare -i input.txt -r ../KN99_T0_merged.gff -s /ref/mblab/data/KN99/KN99_genome_fungidb.fasta -p C8_vs_KN99_T0
+#
+
+ Total union super-loci across all input datasets: 8614 
+12938 out of 12938 consensus transcripts written in gffcmp.annotated.gtf (0 discarded as redundant)

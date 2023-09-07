@@ -1,0 +1,228 @@
+# Comparing Transcriptomes
+
+## The data
+
+The command used to infer the transcriptome from each sample.
+
+```{raw}
+stringtie \
+    TDY3279.T0.R4.markdup.sorted.bam \
+    --rf \
+    -G gt_tidied3_with_markers.gtf \
+    -o TDY3279.T0.R4.transcripts.gtf \
+    -A TDY3279.T0.R4.gene.abundance.txt \
+    -C TDY3279.T0.R4.coverage.gtf \
+    -b TDY3279.T0.R4.ballgown \
+    -p 6 \
+    --conservative
+```
+
+Note that `--conservative` sets the following:
+
+`-t -c 1.5 -f 0.05`
+
+which means:
+
+```{raw}
+ -t disable trimming of predicted transcripts based on coverage
+    (default: coverage trimming is enabled)
+
+ -f minimum isoform fraction (default: 0.01)
+
+ -c minimum reads per bp coverage to consider for multi-exon transcript
+    (default: 1)
+```
+
+We can also merge gff files -- eg from individual samples -- into a single transcriptome file. I did this for KN99 T0 and T24 and C8 T0 and T24 with a cmd which looks like:
+
+```{raw}
+stringtie --merge \
+  -G $ref_gff \
+  -o ${output_gff_filename}.gff \
+  -g 100 \
+  /path/to/sample1.gff /path/to/sample2.gff ...
+```
+
+Note that `-g 100` sets the following:
+
+```{raw}
+  -g <gap_len>     gap between transcripts to merge together (default: 250)
+```
+
+And is based on the distribution of intron lengths in the KN99 gff (extracting this data is shown below):
+
+```{raw}
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+   1.00   51.00   56.00   65.18   64.00 2124.00 
+```
+
+## gffCompare
+
+we can use gffCompare to compare transcriptomes. Input to 
+gffCompare is a list of gffs and optionally a reference 
+gff to compare against. There is no requirement as to 
+what the 'reference' is -- one way to do this would be 
+to provide the C8 T0 and C8 T24 gffs with the KN99 T0 
+as a reference for instance. I chose the following 
+comparisons:
+
+- C8 and KN99 at T0 against the reference
+
+- C8 and KN99 at T24 against the reference
+
+An example cmd, at T24 is this:
+
+```{raw}
+gffcompare \
+  -i input.txt \
+  -r /ref/mblab/data/KN99/proposed_new_annotations/gt_tidied3_with_markers.gff \
+  -s /ref/mblab/data/KN99/KN99_genome_fungidb.fasta \
+  -p C8_T0
+```
+
+Where input.txt is just a list of filepaths:
+
+```{raw}
+../C8_T0_merged.gff
+```
+
+Note that these "merged" files are result of the `stringtie merge` operation 
+described above.
+
+## Ballgown
+
+Stringtie optionally outputs the transriptome assembly data in a format
+suitable for input to the bioconductor package
+[ballgown](https://bioconductor.org/packages/release/bioc/html/ballgown.html).
+
+This is included in the RNAseq pipeline output at 
+`star_salmon/stringtie/<samplename>.ballgown/`
+
+## Ballgown
+
+Ballgown is part of the tuxedo RNAseq analysis suite. This tool
+
+See the tutorial at:
+
+[ballgown](https://bioconductor.org/packages/release/bioc/vignettes/ballgown/inst/doc/ballgown.html)
+
+```{r setup}
+library(GenomicFeatures)
+library(AnnotationDbi)
+library(Gviz)
+library(ballgown)
+library(tidyverse)
+library(here)
+
+# # create the txdb like this:
+# txdb = GenomicFeatures::makeTxDbFromGFF(
+#   here("data/gt_tidied3_with_markers.gff"))
+# # and save it
+# AnnotationDbi::saveDb(txdb, here("data/gt_tidied3_with_markers.sqlite"))
+
+txdb = AnnotationDbi::loadDb(here("data/gt_tidied3_with_markers.sqlite"))
+```
+
+```{r}
+# this takes a moment to generate -- the results are 
+# saved in the `data` dir. This is how they were 
+# created
+# 
+# data_directories = list(
+#   exp069 = "/mnt/scratch/bsa/results_069/gffs/ballgown/",
+#   exp089 = "/mnt/scratch/bsa/results_089_full/gffs/ballgown/"
+# )
+# 
+# bg_data = map(data_directories, 
+#               ~ballgown(dataDir = ., 
+#                         samplePattern='[KN99,C8]'))
+# 
+# write_rds(bg_data, here("data/exp069_089_bg_data.rds"), compress = 'gz')
+
+bg_data = readRDS(here("data/exp069_089_bg_data.rds"))
+```
+
+```{r}
+target_range <- 
+  GRanges(seqnames = "CP022321.1", 
+          ranges = IRanges(start = 1257935, 
+                           end = 1332883))
+
+
+transcripts_subset = 
+  subsetByOverlaps(structure(bg_data$exp069)$trans,
+                   target_range)
+
+indexes(bg_data$exp069)$t2g %>% 
+  filter(t_id %in% names(transcripts_subset)) %>%
+  head()
+```
+
+```{r}
+options(ucscChromosomeNames=FALSE)
+gr = x$CNAG_00515
+
+# Make sure the GRanges object is sorted
+gr <- sort(gr)
+
+# Group the GRanges object by transcript ID to create a GRangesList
+grl <- split(gr, gr$tx_id)
+
+# Create a TranscriptTrack
+geneTrack <- GeneRegionTrack(txdb)
+
+# Define the genomic region of interest
+chr <- unique(as.character(seqnames(gr)))
+start <- min(start(gr))  # Minimum start coordinate in gr
+end <- max(end(gr))      # Maximum end coordinate in gr
+
+# Plot the tracks
+plotTracks(list(geneTrack),
+           chr=chr,from = start-500, to=end+500)
+
+
+
+
+```
+
+
+```{r}
+plotTranscripts(gene='CNAG_00515', 
+                gown=bg_data$exp069, 
+                samples=sampleNames(bg_data$exp069)[1:5], 
+                meas='FPKM', 
+                colorby='transcript',
+                main = "C8 T0 Replicates")
+```
+
+```{r}
+plotTranscripts(gene='CNAG_00515', 
+                gown=bg_data$exp069, 
+                samples=sampleNames(bg_data$exp069)[6:10], 
+                meas='FPKM', 
+                colorby='transcript',
+                main = "C8 T24 Replicates")
+```
+```{r}
+plotTranscripts(gene='CNAG_00515', 
+                gown=bg_data$exp069, 
+                samples=sampleNames(bg_data$exp069)[11:15], 
+                meas='FPKM', 
+                colorby='transcript',
+                main = "KN99 T0 Replicates")
+```
+```{r}
+plotTranscripts(gene='CNAG_00515', 
+                gown=bg_data$exp069, 
+                samples=sampleNames(bg_data$exp069)[16:20], 
+                meas='FPKM', 
+                colorby='transcript',
+                main = "KN99 T24 Replicates")
+```
+
+
+We want to look at some genes in a given region:
+
+CP022321.1:1257,935-1332883
+
+
